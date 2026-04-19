@@ -82,6 +82,6 @@ def process_data(input_file, output_file):
 if __name__ == "__main__":
     # Example usage
     process_data(
-        input_file="D:/coursera_mlops_3/house-price-prediction/data/raw/house_data.csv", 
-        output_file="D:/coursera_mlops_3/house-price-prediction/data/processed/cleaned_house_data.csv"
+        input_file="house-price-prediction\\data\\raw\\house_data.csv", 
+        output_file="house-price-prediction\\data\\processed\\cleaned_house_data.csv"
     )
