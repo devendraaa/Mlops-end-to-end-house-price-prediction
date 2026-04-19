@@ -75,4 +75,4 @@ jobs:
           context: "."
           file: "Dockerfile"
           push: true
-          tags: devendraaa/fastapi:{{ github.sha }}
+          tags: devendraaa/fastapi:${{ github.sha }}
