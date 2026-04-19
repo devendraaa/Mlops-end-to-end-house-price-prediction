@@ -80,8 +80,18 @@ def process_data(input_file, output_file):
     return df_cleaned
 
 if __name__ == "__main__":
-    # Example usage
+    base_path = Path(__file__).resolve().parent.parent.parent
+
     process_data(
-        input_file="data\\raw\\house_data.csv", 
-        output_file="data\\processed\\cleaned_house_data.csv"
-    )
+        input_file=base_path / "data" / "raw" / "house_data.csv",
+        output_file=base_path / "data" / "processed" / "cleaned_house_data.csv"
+        )
+
+
+# if __name__ == "__main__":
+#     # Example usage
+#     process_data(
+#         input_file="data\\raw\\house_data.csv", 
+#         output_file="data\\processed\\cleaned_house_data.csv"
+#     )
+
