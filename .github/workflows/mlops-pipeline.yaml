@@ -28,7 +28,7 @@ on:
       types: [ created ]
       branches: [ main ]
       tags: [ 'v*.*.*' ]
-  
+      
 jobs:
   # -------------------------------
   # 1. DATA PROCESSING
