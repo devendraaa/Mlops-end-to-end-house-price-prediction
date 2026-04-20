@@ -1,0 +1,232 @@
+name: mlops-ci-workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_all:
+        description: 'Run entire workflow'
+        required: false
+        default: 'false'
+      run_data_processing:
+        description: 'Run Data Processing'
+        required: false
+        default: 'false'
+      run_feature_engineering:
+        description: 'Run Feature Engineering'
+        required: false
+        default: 'false'
+      run_model_training:
+        description: 'Run Model Training'
+        required: false
+        default: 'false'
+      run_docker_build_and_publish:
+        description: 'Run Docker Build and Publish'
+        required: false
+        default: 'false'
+    realised:
+      types: [ created ]
+      branches: [ main ]
+      tags: [ 'v*.*.*' ]
+  
+jobs:
+  # -------------------------------
+  # 1. DATA PROCESSING
+  # -------------------------------
+  data_processing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+
+      - name: Install Dependencies
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt 
+         
+      
+      - name: Run Data Preprocessing
+        run: |
+          python src/data/run_processing.py \
+            --input data/raw/house_data.csv \
+            --output data/processed/cleaned_house_data.csv
+
+      - name: Upload Processed Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleaned-data
+          path: data/processed/cleaned_house_data.csv
+
+  # -------------------------------
+  # 2. FEATURE ENGINEERING
+  # -------------------------------
+  feature_engineering:
+    runs-on: ubuntu-latest
+    needs: data_processing
+
+    steps:
+      - name: Checkout Code
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download Processed Data
+        uses: actions/download-artifact@v4
+        with:
+          name: cleaned-data
+          path: data/processed
+
+      - name: Feature Engineering
+        run: |
+          python src/features/engineer.py \
+            --input data/processed/cleaned_house_data.csv \
+            --output data/processed/featured_house_data.csv \
+            --preprocessor models/preprocessor.pkl
+
+      - name: Upload Featured Data + Preprocessor
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-data
+          path: |
+            data/processed/featured_house_data.csv
+            models/preprocessor.pkl
+
+  # -------------------------------
+  # 3. MODEL TRAINING
+  # -------------------------------
+  model-training:
+    runs-on: ubuntu-latest
+    needs: feature_engineering
+
+    steps:
+      - name: Checkout Code
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download Feature Data
+        uses: actions/download-artifact@v4
+        with:
+          name: feature-data
+          path: data/processed/featured_house_data.csv
+
+      - name: Start MLflow
+        run: |
+          docker pull ghcr.io/mlflow/mlflow:latest
+          docker run -d -p 5000:5000 --name mlflow-server ghcr.io/mlflow/mlflow:latest \
+            mlflow server \
+            --host 0.0.0.0 \
+            --port 5000 \
+            --backend-store-uri sqlite:///mlflow.db \
+            --default-artifact-root /tmp/mlruns
+
+      - name: Wait for MLflow
+        run: |
+          for i in {1..10}; do
+            if curl -s http://localhost:5000 > /dev/null; then
+              echo "MLflow is up!"
+              break
+            fi
+            echo "Waiting for MLflow..."
+            sleep 5
+          done
+
+      - name: Train Model
+        run: |
+          mkdir -p models
+          python src/models/train_model.py \
+            --config configs/model_config.yaml \
+            --data data/processed/featured_house_data.csv \
+            --models-dir models \
+            --mlflow-tracking-uri http://localhost:5000
+
+      - name: Upload trained Model
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: models/
+
+      - name: Clean up MLflow
+        run: |
+          docker stop mlflow-server || true
+          docker rm mlflow-server || true
+
+  # -------------------------------
+  # 4. BUILD & PUSH DOCKER
+  # -------------------------------
+  docker_build_and_publish:
+    runs-on: ubuntu-latest
+    needs: training
+
+    steps:
+      - name: Checkout Code
+      - uses: actions/checkout@v4
+
+      - name: Download Trained Model
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: models/
+      
+      - name: download preprocessor
+        uses: actions/download-artifact@v4
+        with:
+          name: preprocessor
+          path: models/preprocessor.pkl
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: docker build and publish
+        run: |
+          COMMIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          docker build -t docker.io/${{ secrets.DOCKER_USERNAME }}/house-price-prediction-model:$COMMIT_SHA -f Dockerfile .
+          docker run -d -p 8000:8000 --name test_api docker.io/${{ secrets.DOCKER_USERNAME }}/house-price-prediction-model:$COMMIT_SHA
+          for i in {1..10}; do
+            if curl -s http://localhost:8000/health > /dev/null; then
+              echo "API is up!"
+              break
+            fi
+            echo "Waiting for API..."
+            sleep 5
+          done
+          docker logs test_api
+        
+      - name: cleanup test container
+        run: |
+          docker stop test_api || true
+          docker rm test_api || true
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Push docker image to Docker Hub
+        run: |
+          COMMIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          docker tag docker.io/${{ secrets.DOCKER_USERNAME }}/house-price-prediction-model:$COMMIT_SHA docker.io/${{ secrets.DOCKER_USERNAME }}/house-price-prediction-model:latest
+          docker push docker.io/${{ secrets.DOCKER_USERNAME }}/house-price-prediction-model:$COMMIT_SHA
+          docker push docker.io/${{ secrets.DOCKER_USERNAME }}/house-price-prediction-model:latest

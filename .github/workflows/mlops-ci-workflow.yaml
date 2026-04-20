@@ -1,11 +1,6 @@
 name: mlops-ci-workflow
 on:
-  push:
-    branches:
-      - main    
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch: {}
   
 jobs:
   E2E_Workflow:
