@@ -1,4 +1,4 @@
-name: mlops-ci-workflow
+name: Mlops Pipeline
 
 on:
   workflow_dispatch:
@@ -24,11 +24,11 @@ on:
         required: false
         default: 'false'
 
-    release:
-      types: [ created ]
-      branches: [ main ]
-      tags: [ 'v*.*.*' ]
-      
+  release:
+    types: [created]
+    branches: [main]
+    tags: [ 'v*.*.*' ]
+
 jobs:
   # -------------------------------
   # 1. DATA PROCESSING
@@ -95,15 +95,19 @@ jobs:
           python src/features/engineer.py \
             --input data/processed/cleaned_house_data.csv \
             --output data/processed/featured_house_data.csv \
-            --preprocessor models/preprocessor.pkl
+            --preprocessor models/trained/preprocessor.pkl
 
-      - name: Upload Featured Data + Preprocessor
+      - name: Upload Featured Data
         uses: actions/upload-artifact@v4
         with:
           name: feature-data
-          path: |
-            data/processed/featured_house_data.csv
-            models/preprocessor.pkl
+          path: data/processed/featured_house_data.csv
+      
+      - name: Upload-Preprocessor
+        uses: actions/upload-artifact@v4
+        with:
+          name: preprocessor_model
+          path: models/trained/preprocessor.pkl
 
   # -------------------------------
   # 3. MODEL TRAINING
@@ -129,7 +133,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: feature-data
-          path: data/processed
+          path: data/processed/
+      
+      - name: Download Preprocessor
+        uses: actions/download-artifact@v4
+        with:
+          name: preprocessor_model
+          path: models/trained/
 
       - name: Start MLflow
         run: |
@@ -192,8 +202,8 @@ jobs:
       - name: download preprocessor
         uses: actions/download-artifact@v4
         with:
-          name: feature-data
-          path: models/
+          name: preprocessor_model
+          path: models/trained/
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
